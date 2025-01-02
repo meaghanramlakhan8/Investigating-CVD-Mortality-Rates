@@ -22,7 +22,7 @@ This repository contains an in-depth analysis of hypertension-related cardiovasc
 ### Dependencies
 Install the necessary R packages:
 ```R
-install.packages(c("dplyr", "ggplot2", "quarto", "stringr", "RSQLite", "mapdata", "maps"))
+install.packages(c("dplyr", "ggplot2", "stringr", "RSQLite", "grid"))
 ```
 
 ### Installation
