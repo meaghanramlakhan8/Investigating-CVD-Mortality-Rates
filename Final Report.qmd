@@ -1,0 +1,722 @@
+---
+title: "Investigating the Rates and Trends in Hypertension-related Cardiovascular Disease Mortality Among US Adults"
+author: "Group 18: Min Choi, Shakty Juarez, Meaghan Ramlakhan, Pinar Targil"
+
+format:
+ pdf: default
+fontsize: 10pt
+geometry: margin=1in
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(ggridges)
+library(scales)
+library(tidyr)
+library(knitr)
+library(RSQLite)
+library(stringr)
+library(grid)
+library(shiny)
+```
+
+# Introduction
+
+Hypertension is a major risk factor for cardiovascular disease (CVD), contributing to a significant portion of CVD-related deaths in the United States. Despite public health efforts to manage hypertension through medication, lifestyle changes, and healthcare interventions, disparities in mortality rates persist across different demographic groups.
+
+This study investigates the trends and factors influencing hypertension-related CVD mortality among US adults aged 35 and older from 2000 to 2019. Our analysis focuses on understanding:
+
+-   How demographic factors, such as **race/ethnicity**, **age**, **geography**, and **sex**, correlate with mortality rates.
+-   Whether public health initiatives have effectively reduced mortality rates over time.
+-   The geographic and demographic disparities that remain in 2019.
+-   The role of health insurance coverage in influencing mortality rates, to examine whether groups with higher insured rates experience lower CVD mortality.
+
+# Key Hypotheses
+
+-   **Geographic disparities**: We expect southern US states to have higher mortality rates due to socioeconomic and healthcare access inequalities.
+-   **Racial/ethnic disparities**: We expect Black Americans to have higher mortality rates due to racially biased system inequities, including limited healthcare access and socioeconomic disadvantages.
+-   **Temporal trends**: We predict a decline in mortality over time, particularly in regions with strong public health initiatives.
+-   **Insurance coverage impact**: We anticipate that groups with higher health insurance coverage rates will have lower mortality rates, reflecting better access to preventive and medical care.
+
+# Data Description
+
+We used a data set from the **Centers for Disease Control and Prevention (CDC)**, covering hypertension-related CVD mortality from 2000 to 2019. The data includes over 1 million observations, classified by state, county, age group, race/ethnicity, sex, and year. To supplement the analysis, we incorporated an additional dataset containing health insurance coverage information, allowing us to explore the relationship between insurance status and CVD mortality.
+
+### Key Variables
+
+-   **Year**: Ranges from 2000 to 2019.
+-   **Mortality Rate**: Age-adjusted hypertension-related mortality rate (deaths per 100,000).
+-   **Race/Ethnicity**: Stratified into **Black**, **White**, **Asian/Pacific Islander**, **American Indian/Alaska Native**, and **Hispanic** groups.
+-   **Sex**: Male and female.
+-   **Percent Insured**: The proportion of the population with health insurance coverage within each demographic group and region.
+-   **Percent Uninsured**: The proportion of the population without health insurance coverage, used to identify potential gaps in healthcare access.
+
+# Methods
+
+We analyzed the data using **dplyr** pipelines to create summaries, new variables, and filtered datasets. **SQL** was utilized for initial data organization, table creation, and merging operations to ensure consistency across the datasets. Our visualizations were primarily created using **ggplot2** to highlight trends and disparities across demographic and geographic factors. Our dual-dataset approach allowed us to identify patterns related to health insurance coverage and its potential influence on mortality rates, providing insights into how access to healthcare may affect outcomes.
+
+```{r, include=FALSE, warning=FALSE, message=FALSE}
+# Setup
+connection_db <- dbConnect(SQLite(), dbname = "C:/Users/shakt/Downloads/CVD.db")
+initExtension(connection_db)
+new_data <- dbReadTable(connection_db, "data")
+```
+
+## Data Cleaning
+
+We began by filtering out irrelevant columns, including location details and data source identifiers, and removed any rows with missing values to ensure the data set was complete and reliable for analysis. For instance, we renamed key variables for clarity: "Stratification1" to "AgeGroup," "Stratification2" to "Race," and "Stratification3" to "Sex." This cleaned data set facilitated our analysis on the effect of certain factors on mortality rates.
+
+## Text Mining
+
+We listed the tables in our database connection_db and loaded the "combined" table, removing the MortalityRatePercentage column and updating "Ages 65 years and older" to "Ages 65+ years" in LabelGrouping. We renamed columns for clarity. For new_data, we standardized terms in Topic and AgeGroup and converted Year to integers. We handled "NA" strings in MortalityRate by replacing them with actual NA values and then filtering and converting to integers. Finally, we created a DiffAvgMortalityRate column showing the difference from the average mortality rate.
+
+```{r, echo = FALSE}
+# List all tables in the connected database
+#dbListTables(connection_db)
+
+# exclude the 'MortalityRatePercentage' column when reading
+combined <- dbReadTable(connection_db, "combined") %>% select(-MortalityRatePercentage)
+
+# Standardize the naming in the age groups and topic, and rename cols
+combined$LabelGrouping <- str_replace_all(combined$LabelGrouping, 
+                                          "Ages 65 years and older", 
+                                          "Ages 65+ years")
+colnames(combined) <- c("Groups", "Total_Count", "Insured", "Percent_Insured", 
+                        "Uninsured", "Percent_Uninsured")
+new_data$Topic <- str_replace_all(new_data$Topic, c("Coronary heart disease \\(CHD\\)" = "CHD",
+                                                    "Cardiovascular disease \\(CVD\\)" = "CVD",
+                                                    "All stroke" = "Stroke",
+                                                    "All heart disease" = "Heart Disease"))
+
+# In new data, standardize age group names, year, rmove NA, convert to integers
+new_data$AgeGroup <- str_replace_all(new_data$AgeGroup, c("Ages 35-64 years"  = "35-64",
+                                                          "Ages 65 years and older" = "65+"))
+new_data$Year <- as.integer(new_data$Year)
+new_data$MortalityRate <- ifelse(new_data$MortalityRate == "NA", NA, new_data$MortalityRate)
+new_data <- new_data %>% filter(!is.na(MortalityRate))
+new_data$MortalityRate <- as.integer(new_data$MortalityRate)
+
+# Calculate the average mortality rate and create a new column showing the difference from the average
+average_mortality_rate <- mean(new_data$MortalityRate)
+new_data$DiffAvgMortalityRate <- round(new_data$MortalityRate - average_mortality_rate, 2)
+
+# Display the first few rows of 'new_data' to check the results
+#head(new_data)
+
+```
+
+# Investigating Data
+
+We began by examining key demographic factors such as race, sex, and geographic location to understand their interaction and contribution to hypertension-related CVD mortality trends across populations.
+
+By analyzing two variables at a time, we can uncover patterns that indicate potential disparities or trends in CVD mortality. For instance, visualizing the relationship between mortality rates and race/ethnicity can help reveal whether specific racial groups are disproportionately affected. Similarly, examining geographic differences can highlight regions where hypertension-related deaths are concentrated.
+
+In the following sections, we present visual analyses for several key variables:
+
+1.  **Hypertension-Related Mortality Rates Over Time**: We explore the overall trend in mortality rates from 2000 to 2019, highlighting any declines and periods of stagnation.
+2.  **Mortality Rate Changes by State (2000 vs. 2019)**: By comparing state-level mortality rates in 2000 and 2019, we can see where the greatest improvements have occurred.
+3.  **Mortality Rates by Age and Sex**: This analysis provides insights into whether older populations or different sexes experience higher mortality rates.
+4.  **Mortality Rates by Race**: Understanding the racial disparities in CVD mortality helps identify which ethnic groups are most vulnerable.
+5.  **Health Insurance Coverage and Its Impact on Mortality Rates**: We analyze whether higher insurance coverage reduces hypertension-related CVD risks and identify populations that may benefit from increased access.
+
+These visualizations lay the groundwork for more complex analyses later in the report, offering a clear picture of how hypertension-related CVD mortality is distributed across different demographics and geographies, and how health insurance coverage might mitigate these risks.
+
+## 1. Line Plot of Mortality Over Time
+
+```{r, echo = FALSE, warning=FALSE, fig.align ='center', fig.height = 5, fig.width = 11}
+# Line Plot
+yearly_data <- dbReadTable(connection_db, "yearly_data")
+plot(yearly_data$Year, yearly_data$MortalityRate, type = "l", col = "blue",
+     xlab = "Year", ylab = "Average Mortality Rate per 100,000 persons",
+     main = "Trend of Hypertension-Related Mortality Over 20 Years", 
+     xlim = c(2000, 2019),   
+     xaxt = "n",             
+     cex.axis = 1.5,         
+     cex.lab = 1.5,          
+     cex.main = 1.8)         
+
+axis(1, at = seq(2000, 2019, by = 1))
+
+```
+
+This line plot illustrates the trend of hypertension-related mortality rates among U.S. adults aged 35 and older from 2000 to 2019. The y-axis represents the average mortality rate per 100,000 persons, while the x-axis shows the years of observation. Over this 20-year period, the graph highlights a clear overall decline in mortality rates, reflecting positive strides in managing hypertension. In 2000, the rate starts at around **350 deaths per 100,000 people** and steadily decreases to approximately **250** by 2019.
+
+The most notable decline occurs between 2000 and 2010, where mortality rates drop significantly from around **350 to 280**. This decrease likely reflects improvements in healthcare interventions, increased awareness, and better management of hypertension. After 2010, the decline slows, with the mortality rate stabilizing around **250-270 per 100,000 people**. Although the trend continues downward, the flattening curve in recent years suggests that progress has slowed, possibly indicating the need for more focused public health measures to address remaining gaps.
+
+## 2. Dumbbell Plot on Change in Mortality Rates
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.height = 5, fig.width = 11}
+# Dumbbell Plot
+mortality_wide <- dbReadTable(connection_db, "mortality_wide")
+x_limits <- range(mortality_wide$Mortality_2000, mortality_wide$Mortality_2019, na.rm = TRUE)
+
+ggplot(mortality_wide, aes(y = LocationAbbr)) +
+  
+  # line connecting points between 2000 and 2019
+  geom_segment(aes(x = Mortality_2000, xend = Mortality_2019, y = LocationAbbr, yend = LocationAbbr), 
+               color = "gray", linewidth = 1.5) +
+  
+  # points for the 2000 and 2019 mortality rates
+  geom_point(aes(x = Mortality_2000, color = "2000"), size = 4) +
+  geom_point(aes(x = Mortality_2019, color = "2019"), size = 4) +
+  
+  theme_minimal() +
+  labs(title = "Change in Mortality Rates between 2000 and 2019",
+       x = "Mortality Rate (per 100,000)",
+       y = "States") +
+  scale_x_continuous(labels = scales::comma, limits = c(min(x_limits) - 50, max(x_limits) + 50)) +
+  scale_color_manual(name = "Year", 
+                     values = c("2000" = "blue", "2019" = "red"),
+                     labels = c("2000", "2019")) +  
+  theme(axis.title.y = element_blank(),
+        legend.position = "bottom",
+        panel.grid.major.y = element_blank()) +  # Remove y-axis gridlines for clarity
+  
+  # labels showing the exact mortality rate for 2000 and 2019
+  geom_text(aes(x = Mortality_2000, label = round(Mortality_2000, 1)), hjust = 1.5, color = "blue") +
+  geom_text(aes(x = Mortality_2019, label = round(Mortality_2019, 1)), hjust = -0.5, color = "red")
+```
+
+This dumbbell graph helps visualize the change in mortality rates from the years 2000 to 2019 for various US states. The plot displays the red dot as being the average mortality rate for the year **2019** in the respective state, and the blue dot shows the average mortality rate for **2000**. Each gray line connecting the dots serves to highlight the extent of the decrease over time for each state.
+
+The plot highlights a consistent decrease in hypertension-related CVD mortality rates over the years. Upon further inspection of the graph, we can determine that **Wyoming (WY), New Jersey (NJ), and Colorado (CO)** show some of the most dramatic reductions in heart disease mortality. For instance, **Wyoming dropped from 451 to 358.8 per 100,000**, and **Colorado dropped from 380 to 298.5 per 100,000**. Similarly to the line plot, the consistent downward trend across all 10 states highlights the effectiveness of public health initiatives aimed at reducing heart disease mortality.
+
+## 3. Faceting Plot for Mortality Across States
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE, fig.align ='center', fig.height = 5, fig.width = 11}
+# Faceting Plot
+states_of_interest <- c("TX", "CA", "NY", "FL")
+new_data_filtered2 <- dbReadTable(connection_db, "new_data_filtered2")
+
+# line graph with facets for each state
+ggplot(new_data_filtered2, aes(x = Year, y = Average_Mortality, group = LocationAbbr, color = LocationAbbr)) +
+  # lines connecting the points to show trends over time
+  geom_line(size = 1) + 
+  # Add points for each year's mortality rate
+  geom_point(size = 3) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 13),
+        axis.text.y = element_text(size = 13),
+        
+        axis.title.x = element_text(size = 17),
+        axis.title.y = element_text(size = 17),
+        plot.title = element_text(size = 17),
+        
+        legend.text = element_text(size = 13),
+        strip.text = element_text(size = 15)) +
+  
+  labs(title = "Mortality Rates From (2000-2019) in Four States",
+       x = "Year",
+       y = "Mortality Rate (per 100,000)",
+       color = "States") +
+  facet_wrap(~LocationAbbr, ncol = 2, scales = "free") +
+  scale_x_discrete(breaks = c(2000, 2002, 2004, 2006, 2008, 2010, 2012, 2015, 2019)) +
+  # Set the y-axis limits from 0 to 600
+  scale_y_continuous(limits = c(0, 500)) +
+  # Rotate x-axis labels for better readability
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+The faceting plot above helps visualize the hypertension-related CVD mortality rates per 100,000 individuals from **2000 to 2019** across **California (CA), Florida (FL), New York (NY), and Texas (TX)**. Each subplot represents the trend for one state over the selected years, allowing for easy state-by-state comparisons all in one place. We can see that **all four states** have experienced an overall decline in heart disease mortality rates. Notably, New York and California have shown a more significant reduction in mortality compared to Floridaand Texas. While all states demonstrate levels of improvement, the variation in the slopes of the lines suggests that there is a **disparity in heart disease-related public health care** among states. This could indicate differences in healthcare policies, preventive measures, and public health initiatives that contribute to varied outcomes in managing heart disease across these regions.
+
+## 4. Boxplot for Mortality Rates by Sex
+
+```{r, echo = FALSE, fig.align ='center', fig.height = 7, fig.width = 11}
+# Boxplot
+# Filter data for the year 2019, excluding missing values and "Overall" sex category
+data_2019_sex <- new_data[new_data$Year == 2019 & new_data$Sex != "Overall", ]
+# Create a boxplot of mortality rates by sex for 2019, with log-scaled y-axis
+boxplot(MortalityRate ~ Sex, 
+        data = data_2019_sex, 
+        col = "pink", 
+        main = "Boxplot of Mortality Rates by Sex (2019)", 
+        xlab = "Sex", 
+        ylab = "Mortality Rate (per 100,000)",
+        log = "y")
+
+```
+
+This boxplot illustrates the mortality rates per 100,000 people in 2019, stratified by sex, and the y-axis is plotted on a logarithmic scale to better visualize our wide range of value and our outliers. Men tend to have higher mortality rates, as indicated by a higher median. Women exhibit a lower median mortality rate than men, suggesting that cardiovascular disease mortality is generally lower among females in 2019. Both distributions show a significant number of outliers (black circles), particularly for men. The clear difference in the median mortality rates between men and women can possibly be attributed to factors such as biological differences (i.ie., earlier development of CVD, blood pressue, and cholesterol), lifestyle (smoking, alcohol, diet), and delayed health care for men.
+
+## 5. Ridgeline Plot for Mortality over Time by Age Group
+
+```{r, echo = FALSE, message = FALSE, warning=FALSE, fig.align ='center', fig.height = 7, fig.width = 11}
+#Ridgeline Plot
+# Further clean data by removing rows where the 'Year' column contains non-numeric values like "-"
+data_cleaned <- new_data %>% filter(!grepl("-", Year)) 
+# Convert 'Year' to a factor and sort in reverse chronological order
+data_cleaned$Year <- factor(data_cleaned$Year, levels = rev(sort(unique(data_cleaned$Year))))
+
+ggplot(data_cleaned, aes(x = MortalityRate, y = Year, fill = AgeGroup)) +
+  geom_density_ridges(scale = 6, alpha = 0.5) + 
+  labs(title = "Cardiovascular Mortality Rates by Year",
+       x = "Mortality Rate (per 100,000)",
+       y = "Year") +
+  xlim(0, 400) +
+  theme_minimal() +
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    
+    axis.title.x = element_text(size = 17),
+    axis.title.y = element_text(size = 17),
+    plot.title = element_text(size = 17))
+```
+
+This ridgeline plot displays the distribution of hypertension-related CVD mortality rates (per 100,000) from **1999 to 2019**, stratified by year and categorized into two age groups: **Red (Ages 35–64 years)** and **Teal (Ages 65+ years)**. Each ridge represents the distribution of mortality rates for a specific year.
+
+The plot illustrates that the cardiovascular mortality rate is consistently **higher for the** **65+ age group** compared to the 35–64 age group, emphasizing that CVD is more prevalent among older adults. Over the 20-year period, we observe a decline in mortality rates for both age groups, as the peaks of the distributions gradually shift to the left.
+
+The **65+ age group** exhibits a broader distribution, particularly in the earlier years, signifying greater variability in mortality rates across different states or regions. In contrast, the **35–64 age group** shows a narrower distribution, indicating more consistent mortality rates across states.
+
+As the timeline progresses from **1999 to 2019**, the overall height and spread of the ridges diminish, showcasing that CVD mortality rates have generally decreased over time for both age groups. This downward trend highlights progress in public health initiatives and medical interventions aimed at reducing hypertension-related CVD deaths.
+
+## 6. Violin Plot for Distribution of Mortality Rates by Race
+
+```{r, echo = FALSE, message = FALSE, warning=FALSE, fig.align ='center', fig.height = 7, fig.width = 11}
+# Violin Plot
+# Filter out the 'Overall' category from new_data
+filtered_data <- new_data %>%
+  filter(Race != "Overall")
+
+# Create a violin plot of mortality rates by ethnicity
+ggplot(filtered_data, aes(x = Race, y = MortalityRate)) +
+  geom_violin(trim = FALSE, fill = "lightblue") +
+  labs(title = "Violin Plot of Mortality Rates by Race",
+       x = "Race",
+       y = "Mortality Rate per 100,000 people (log scale)") +
+  scale_y_log10(breaks = c(1, 10, 100, 1000, 10000)) + # Apply a log10 scale to the y-axis w specific tick marks
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 16),
+        axis.text.y = element_text(size = 13),
+        
+        axis.title.x = element_text(size = 17),
+        axis.title.y = element_text(size = 17),
+        plot.title = element_text(size = 17))
+
+```
+
+This violin plot offers a view of the distribution of mortality rates per 100,000 people across various ethnic groups, using a logarithmic y-axis to handle the wide range of values. The width of each violin at a given y-value reflects the density of observations, emphasizing where mortality rates are most concentrated for each group.
+
+The differences in violin widths at various points on the log scale highlight important disparities in mortality rates between ethnicities. Asian/Pacific Islander and Hispanic groups show relatively lower and more consistent rates, with concentrated mortality near 100. On the other hand, Black (Non-Hispanic) and White populations display broader distributions of higher mortality rates. The American Indian/Alaska Native group, with its dual peaks around 30 and 100, stands out for its more diverse range of mortality rates. These observations underscore the varying public health challenges faced by different ethnic groups, with some experiencing more concentrated and lower mortality rates, while others have wider distributions and higher overall rates.
+
+## 7. Clustered Bar Plot for Mortality Rates By Race
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.align ='center', fig.height = 7, fig.width = 11}
+# Clustered Bar Plot
+# Calculate the average mortality rates and arrange the data
+data_avg <- dbReadTable(connection_db, "data_avg")
+data_odd_year <- data_avg %>% # odd years
+  filter(Year %in% c(2001, 2003, 2005, 2007, 2009, 2011, 2013, 2015, 2017, 2019))
+
+ggplot(data_odd_year, aes(x = factor(Year), y = avg_mortality, fill = Race)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
+  labs(title = "Average Cardiovascular Mortality Rates by Race Over Time",
+       x = "Year", 
+       y = "Average Mortality Rate (per 100,000)",
+       fill = "Race") + 
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(size = 13),
+    axis.text.y = element_text(size = 13),
+    axis.title.x = element_text(size = 17),
+    axis.title.y = element_text(size = 17),
+    plot.title = element_text(size = 17)
+  ) + 
+  coord_flip()  # Flip coordinates to switch the x and y axes
+
+
+```
+
+This clustered bar plot displays the average hypertension-related CVD mortality rate (per 100,000 people) by race/ethnic group over time from 2001 to 2019. From the plot, we can see that **Black and White individuals** consistently exhibit the **highest mortality rates** across all years, showing notably longer bars compared to others, especially in the early 2000s. In contrast, **Asian/Pacific Islanders** have consistently maintained the lowest cardiovascular mortality rates over the entire period.
+
+Over the years, the mortality rates for most racial/ethnic groups show a general decline, with the most pronounced reductions observed in the Black and White populations. Despite the overall decline and the gap between Black and White populations and other racial groups narrowing over time, the plot underscores that disparities remain, as the **Black and White populations** continue to face higher average mortality rates. This persistent difference highlights the importance of targeted public health interventions to address cardiovascular health disparities among racial and ethnic groups.
+
+## 8. Regression Analysis
+
+```{r, echo = FALSE, warning = FALSE, fig.align ='center', fig.height = 7, fig.width = 11}
+# Regression
+raw_data <- dbReadTable(connection_db, "raw_data")
+# Ensure 'Year' and relevant columns are treated as numeric
+raw_data$Year <- as.integer(raw_data$Year)
+raw_data$Data_Value <- as.numeric(raw_data$Data_Value)
+raw_data$Confidence_limit_Low <- as.numeric(raw_data$Confidence_limit_Low)
+raw_data$Confidence_limit_High <- as.numeric(raw_data$Confidence_limit_High)
+
+# Filter data for the year 2019 and where 'Stratification2' is not 'Overall'
+data_2019 <- raw_data[raw_data$Year == 2019 & raw_data$Stratification2 != "Overall", ]
+
+data_2019_clean <- na.omit(data_2019[, c("Data_Value", "Stratification1", "Stratification2", "Confidence_limit_Low", "Confidence_limit_High")])
+
+# Apply log transformation to the dependent variable (mortality rates)
+data_2019_clean$log_Data_Value <- log(data_2019_clean$Data_Value)
+
+# Fit a linear regression model on the transformed response
+# mortality ~ age group, race, CL
+log_model <- lm(log_Data_Value ~ Stratification1 + Stratification2 + Confidence_limit_Low + Confidence_limit_High, data = data_2019_clean)
+
+# Predicted values on the log scale
+predicted_log <- predict(log_model)
+
+# Convert predictions back to the original scale by applying the exponential function
+predicted_original_scale <- exp(predicted_log)
+
+# Ensure the lengths of actual and predicted values match
+if (length(data_2019_clean$Data_Value) == length(predicted_original_scale)) {
+  
+  # Apply log transformation to both actual and predicted values for plotting
+  log_actual <- log(data_2019_clean$Data_Value)
+  log_predicted <- log(predicted_original_scale)
+  
+  # Remove outliers (e.g., above the 99th percentile for actual values)
+  threshold <- quantile(data_2019_clean$Data_Value, 0.99)
+  filtered_indices <- data_2019_clean$Data_Value <= threshold
+  filtered_actual <- data_2019_clean$Data_Value[filtered_indices]
+  filtered_predicted <- predicted_original_scale[filtered_indices]
+  
+  # Plot: Actual vs Predicted Mortality Rates (Filtered)
+  model <- lm(filtered_predicted ~ filtered_actual)
+  plot(filtered_actual, filtered_predicted, 
+       main = "Predicted vs Actual Mortality Rates (Filtered)",
+       xlab = "Actual Mortality Rate per 100,000 people", 
+       ylab = "Predicted Mortality Rate per 100,000 people", 
+       ylim = c(0, 6000),
+       col = "blue", pch = 16)
+  abline(0, 1, col = "red")  # Reference line
+
+} else {
+  cat("Error: Actual and predicted values lengths do not match!")
+}
+
+```
+
+This plot illustrates the relationship between the actual and predicted mortality rates from a linear regression model for the year 2019. The model was built using log-transformed data and focuses on predicting county-level mortality rates based on factors such as age and race and the provided confidence limits. The data was cleaned and filtered to remove outliers.
+
+In the context of this project, the linear regression analysis provides a starting point for understanding how well the selected variables explain variations in mortality rates across different counties. The plot shows that while the predicted mortality rates generally follow the actual rates (as seen in the cluster of points near the reference line), the model tends to overpredict in regions with higher actual mortality rates (e.g., counties with rates exceeding 800 per 100,000 people). This indicates that the model may not fully capture the complexities associated with these high-mortality regions, possibly due to unaccounted socioeconomic or healthcare-related factors.
+
+The red reference line represents a perfect fit where the predicted rates would match the actual mortality rates exactly. However, the divergence of points, especially at the higher end of the mortality spectrum, suggests the model might not be accurately predicting the highest-risk counties.
+
+Overall, this regression analysis offers valuable insights into how to proceed with our analysis by highlighting limitations in the model's ability to account for extreme cases. The insights from this regression analysis could inform future public health interventions by identifying areas where the current model underperforms and where more targeted analysis is needed to understand the underlying causes of higher mortality rates.
+
+# Relationship of Health Insurance with CVD
+
+In this study, we also aimed to understand how health insurance coverage intersects with CVD outcomes, focusing on hypertension-related mortality. Understanding the distribution of insured estimates is not only vital for assessing overall coverage but also plays a critical role in examining health outcomes, including those related to CVD. Health insurance coverage is often linked to the accessibility and quality of healthcare services, which can directly influence the management and prevention of chronic conditions like CVD. To deepen our analysis, we integrated health insurance data with our primary dataset on hypertension-related CVD mortality. These insights set the stage for the following visual analyses, which delve deeper into the relationships between health insurance coverage and hypertension-related CVD mortality across different demographics.
+
+## 9. Diverging Lollipop Chart for Insured Estimates by Group
+
+```{r, echo=FALSE, fig.align ='center', fig.height = 4, fig.width = 11}
+# Diverging Lolipop
+
+combined_data <- dbReadTable(connection_db, "combined")
+# Ensure InsuredEstimate is numeric
+combined_data$InsuredEstimate <- as.numeric(combined_data$InsuredEstimate)
+# Check for NA values
+if (any(is.na(combined_data$InsuredEstimate))) {
+  warning("There are NA values in 'InsuredEstimate' after conversion. Check for non-numeric entries.")
+}
+
+# mean of InsuredEstimate for use as a baseline
+mean_insured_estimate <- mean(combined_data$InsuredEstimate, na.rm = TRUE)
+
+# Create a new column for deviation from the mean
+combined_data$Deviation <- combined_data$InsuredEstimate - mean_insured_estimate
+
+ggplot(data = combined_data, aes(x = reorder(LabelGrouping, Deviation), y = Deviation)) +
+  geom_segment(aes(x = reorder(LabelGrouping, Deviation), xend = reorder(LabelGrouping, Deviation), 
+                   y = 0, yend = Deviation), color = "grey") +
+  geom_point(aes(color = Deviation > 0), size = 4) +  # Color points based on positive/negative deviation
+  scale_color_manual(values = c("red", "dodgerblue")) +  #colors for positive (blue) and negative (red)
+  geom_text(aes(label = scales::comma(InsuredEstimate)),
+            hjust = ifelse(combined_data$Deviation > 0, -0.3, 1.3), 
+            size = 3, color = "black") +  # Add data labels with conditional positioning
+  coord_flip() +  # Flip axes for better readability
+  scale_y_continuous(labels = scales::comma) +  # Format y-axis with commas for better readability
+  labs(
+    title = "Diverging Lollipop Chart of Insured Estimates by Group",
+    x = "Group",
+    y = "Deviation from Mean Insured Estimate"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),  
+    axis.title.y = element_text(face = "bold"),
+    axis.title.x = element_text(face = "bold"),
+    legend.position = "none"  # Remove legend for simplicity
+  )
+
+```
+
+The diverging lollipop chart provides insights into the distribution of insured estimates across demographic groups. The **White**, **Women**, and **Men** groups show positive deviations from the mean, indicating higher insured estimates compared to the average. This suggests that these groups benefit from better access to employment-related insurance, higher income levels, or other socioeconomic advantages.
+
+Conversely, groups such as **American Indian/Alaska Native**, **Asian/Pacific Islander**, **Black (Non-Hispanic)**, **Hispanic**, and **Ages 65 years and older** exhibit negative deviations from the mean, highlighting potential disparities in insurance coverage. The **American Indian/Alaska Native** group shows the largest negative deviation, indicating significant challenges in accessing insurance. These trends may reflect social and economic barriers, such as employment in sectors without comprehensive insurance or systemic inequalities.
+
+The age analysis shows that while the **Ages 35-64 years** group has insured estimates above the mean, the **Ages 65 years and older** group falls below, suggesting potential gaps in senior coverage despite programs like Medicare.
+
+Overall, these findings highlight the need for targeted policies to address insurance disparities, particularly for underserved groups. Ensuring equitable access to insurance is crucial for improving healthcare access and reducing disparities. Further analysis of these deviations could inform effective strategies to promote insurance equity, especially when considering how insurance coverage impacts health outcomes like CVD mortality.
+
+# Relationship of Behavioral Trends and CVD
+
+From our analysis thus far, we determined that insurance coverage and basic demographic factors alone do not fully explain CVD mortality rates. To better understand these trends in relation to lifestyle and health, we incorporated data from **County Health Rankings & Roadmaps**, which provides behavioral statistics for each U.S. county, such as obesity rates, unemployment rates, insurance rates, smoking rates, education rates, and particulate matter rates. To integrate this with our analysis, we added a column to the data set showing the average CVD mortality rate for each county. To explore the relationships between each variable and mortality rates, we created scatter plots with regression lines for each variable. Additionally, to identify the variables most strongly correlated with mortality, we generated a table ranking these correlations.
+
+## 10. Scatter Plots of Variables vs. Average Mortality Rate per County
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE, fig.height = 7, fig.width = 11}
+# Secondary Data Regression Visualization
+behavioral_data <- dbReadTable(connection_db, "combined_final")
+
+# Convert all columns to numeric except for "State" and "County"
+numeric_behavioral_data <- behavioral_data %>%
+  mutate(across(-c(State, County), as.numeric))  # Convert the other columns to numeric
+behavioral_subset <- numeric_behavioral_data[, !(names(numeric_behavioral_data) %in% c("State", "County", "median_mortality_rate"))]
+behavioral_long <- pivot_longer(behavioral_subset, cols = -avg_mortality_rate, 
+                        names_to = "Variable", values_to = "Value")
+behavioral_long <- behavioral_long %>% 
+  mutate(Variable = gsub("_", " ", Variable) %>%
+                     str_to_title())
+  
+# Create scatter plots
+ggplot(behavioral_long, aes(x = Value, y = avg_mortality_rate)) +
+  geom_point(alpha = 0.05, color = "darkblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  facet_wrap(~Variable, scales = "free_x") +
+  theme_minimal() +
+  labs(title = "Scatter Plots of Variables vs. Average Mortality Rate",
+       x = "Variable Value",
+       y = "Average Mortality Rate")
+
+behavioral_subset_2 <- behavioral_subset[, !(names(behavioral_subset) %in% c( "physically_unhealthy_days", "percent_fair_poor_health"))] # subset without redundant variables
+cor_matrix <- cor(behavioral_subset_2, use = "complete.obs") # Compute the correlation matrix
+# Extract the correlations with avg_mortality_rate and sort them
+cor_with_mortality <- cor_matrix["avg_mortality_rate", ]
+cor_with_mortality_sorted <- sort(cor_with_mortality, decreasing = TRUE)
+cor_with_mortality_sorted <- cor_with_mortality_sorted[cor_with_mortality_sorted != 1]
+# Create df for the top variables
+top_correlations <- data.frame(
+  Correlation = cor_with_mortality_sorted
+)
+# Display the table using kable
+kable(top_correlations, caption = "Variables Most Correlated with Average Mortality Rate", digits = 2)
+```
+
+Our analysis revealed that the strongest predictors of CVD mortality are physical inactivity (0.57), obesity (0.49), mentally unhealthy days (0.48), smoking (0.48), and college education (-0.42). To further understand how these factors vary geographically, we created U.S. county maps for each variable, highlighting their distribution across the country.
+
+## 11. US Maps for Variables by County
+
+```{r, echo=FALSE, warning = FALSE, message = FALSE, fig.height = 7, fig.width = 11}
+# Function to generate a US county map with a specified variable 
+generate_county_map <- function(df, variable_name) {
+    # Create a cleaned version of variable_name for the title and fill label
+  cleaned_variable_name <- gsub("_", " ", variable_name) %>%
+    str_to_title()
+  
+  # Standardize county and state names in the dataset and in the county map data.
+  df <- df %>%
+    mutate(
+      state = tolower(State),
+      county = tolower(County)
+    )
+  county_map <- map_data("county")
+  county_map <- county_map %>%
+    mutate(
+      state = tolower(region),
+      county = tolower(subregion)
+    )
+  
+  
+  # Join the data
+  merged_data <- county_map %>%
+    left_join(df, by = c("state", "county"))
+  # Calculate the avg for the specified variable (e.g. obesity rate)
+  variable_avg <- mean(df[[variable_name]], na.rm = TRUE)
+  # Fill missing values for the variable with the calculated average
+  df <- df %>%
+    mutate(!!variable_name := ifelse(is.na(!!sym(variable_name)), variable_avg, !!sym(variable_name)))
+  # Merge again to fill missing values in county_map data
+  county_map <- county_map %>%
+    left_join(df, by = c("state", "county")) %>%
+    mutate(!!variable_name := ifelse(is.na(!!sym(variable_name)), variable_avg, !!sym(variable_name)))
+  # Plot the map with the specified variable
+  map_plot <- ggplot(county_map, aes(long, lat, group = group, fill = !!sym(variable_name))) +
+    geom_polygon(color = NA, size = 0.1) +
+    scale_fill_viridis_c(option = "plasma", na.value = "gray90") +  # Viridis color scale
+    coord_fixed(1.3) +  # Fix aspect ratio for US map
+    theme_void() +  # Minimal theme
+    labs(
+      title = paste(cleaned_variable_name, "by US County"),
+      fill = cleaned_variable_name
+    )
+  return(map_plot)
+}
+
+# Plotting most significant variables from earilier analysis
+map1 <- generate_county_map(numeric_behavioral_data, "avg_mortality_rate")
+map2 <-generate_county_map(numeric_behavioral_data, "percent_physically_inactive")
+map3 <-generate_county_map(numeric_behavioral_data, "percent_obese")
+map4 <-generate_county_map(numeric_behavioral_data, "percent_smokers")
+map5 <-generate_county_map(numeric_behavioral_data, "percent_unemployed")
+map6 <-generate_county_map(numeric_behavioral_data, "percent_some_college")
+map7 <-generate_county_map(numeric_behavioral_data, "percent_excessive_drinking")
+map8 <-generate_county_map(numeric_behavioral_data, "avg_daily_PM")
+library(gridExtra)
+# display in a grid
+grid.arrange(map1, map2, map3, map4, map5, map6, map7,map8, ncol = 2)
+
+```
+
+These maps reveal distinct geographic patterns, with Southern states—particularly the **South East and Central regions**, including Mississippi and Alabama—standing out for their high rates of CVD mortality, physical inactivity, obesity, and smoking, along with their low college education rates. While these variables are strongly correlated with CVD mortality, it is important to note that correlation does not imply direct causation. Factors such as smoking and obesity are well-established risk factors, yet the elevated mortality rates point to deeper systemic issues beyond individual behaviors. These include longstanding **economic disparities, limited access to healthcare, and insufficient education** on healthy lifestyles, all of which compound the public health challenges in these regions. The consistently high mortality rates in these areas reflect the urgent need for comprehensive public health reforms that address both the **social** and **structural determinants of health**. Policies that focus on improving healthcare access, increasing education on healthy habits, and addressing underlying economic inequalities are crucial steps in reducing CVD mortality and closing health disparities.
+
+# Killer Plot
+
+```{r, echo=FALSE, warning=FALSE, fig.dim = c(8,8)}
+# Killer Plot
+
+# Function to draw figures for each main cause
+draw_county_figure <- function(x, y, size, dominant_factor) {
+  if (dominant_factor == "Smoking") {
+    # Draw a cigarette (rectangle with smoke lines)
+    grid.rect(x = x, y = y, width = size * 0.4, height = size * 0.1, 
+              gp = gpar(fill = "gray44", col = "black"))
+    grid.lines(x = c(x + size * 0.2, x + size * 0.25), y = c(y + size * 0.1, y + size * 0.2), 
+               gp = gpar(lwd = 1, col = "black"))
+    grid.lines(x = c(x + size * 0.15, x + size * 0.2), y = c(y + size * 0.15, y + size * 0.25), 
+               gp = gpar(lwd = 1, col = "black"))
+  } else if (dominant_factor == "Obesity") {
+    # Draw a hamburger
+    grid.roundrect(x = x, y = y + size * 0.23, width = size * 0.3, height = size * 0.1, 
+                   r = unit(0.6, "npc"), gp = gpar(fill = "tan3", col = "tan3"))
+    grid.roundrect(x = x, y = y + size * 0.175, width = size * 0.3, height = size * 0.05, 
+                   r = unit(0.6, "npc"), gp = gpar(fill = "brown3", col = "brown3"))
+    grid.roundrect(x = x, y = y + size * 0.125, width = size * 0.3, height = size * 0.05, 
+                   r = unit(0.6, "npc"), gp = gpar(fill = "gold1", col = "gold1"))
+    grid.roundrect(x = x, y = y + size * 0.075, width = size * 0.3, height = size * 0.05, 
+                   r = unit(0.6, "npc"), gp = gpar(fill = "chartreuse3", col = "chartreuse3"))
+    grid.roundrect(x = x, y = y+ size * 0.025, width = size * 0.3, height = size * 0.05, 
+                   r = unit(0.6, "npc"), gp = gpar(fill = "tan3", col = "tan3"))  # Bottom bun
+  } else if (dominant_factor == "Inactivity") {
+    # Draw a round couch
+    y_shift <- size * 0.2
+    
+    grid.roundrect(x = x, y = y + size * 0.05 + y_shift, width = size * 0.6, 
+                   height = size * 0.3, r = unit(0.6, "npc"), 
+                   gp = gpar(fill = "sienna1", col = "sienna3")) 
+    grid.roundrect(x = x - size * 0.3, y = y + size * 0.05 + y_shift, width = size * 0.1, 
+                   height = size * 0.2, r = unit(0.6, "npc"), 
+                   gp = gpar(fill = "seagreen2", col = "seagreen4")) # Left armrest
+    grid.roundrect(x = x + size * 0.3, y = y + size * 0.05 + y_shift, width = size * 0.1, 
+                   height = size * 0.2, r = unit(0.6, "npc"), 
+                   gp = gpar(fill = "seagreen2", col = "seagreen4")) # Right armrest
+    grid.roundrect(x = x, y = y + size * 0.2 + y_shift, width = size * 0.4, 
+                   height = size * 0.2, r = unit(0.6, "npc"), 
+                   gp = gpar(fill = "sienna1", col = "sienna3")) # cushion
+    grid.roundrect(x = x - size * 0.15, y = y - size * 0.12 + y_shift, width = size * 0.15, 
+                   height = size * 0.1, r = unit(0.6, "npc"), 
+                   gp = gpar(fill = "seagreen2", col = "seagreen4")) # Left leg 
+    grid.roundrect(x = x + size * 0.15, y = y - size * 0.12 + y_shift, width = size * 0.15, 
+                   height = size * 0.1, r = unit(0.6, "npc"), 
+                   gp = gpar(fill = "seagreen2", col = "seagreen4")) # Right leg
+  } else if (dominant_factor == "Alcoholic") {
+    # Draw a beer
+    grid.roundrect(x = x, y = y + size * 0.23, width = size * 0.3, height = size * 0.32, 
+                   r = unit(0.1, "npc"), gp = gpar(fill = "goldenrod1", col = "goldenrod1"))
+    grid.roundrect(x = x, y = y + size * 0.34, width = size * 0.32, height = size * 0.1, 
+                   r = unit(0.6, "npc"), gp = gpar(fill = "cornsilk", col = "cornsilk3"))
+    grid.circle(x = x + size * 0.18, y = y + size * 0.2, r = size * 0.09, 
+                gp = gpar(fill = NA, col = "goldenrod1", lwd = 4))
+    grid.circle(x = x + size * 0.18, y = y + size * 0.2, r = size * 0.06, 
+                gp = gpar(fill = "white", col = "white"))
+  }
+}
+
+# Function to create the grid layout plot
+create_killer_plot <- function(data) {
+  # Arrange counties alphabetically
+  data <- data %>% arrange(County)
+  
+  # Define grid layout
+  num_cols <- 6
+  num_rows <- ceiling(nrow(data) / num_cols)
+  grid.newpage()
+  
+  pushViewport(viewport(width = 1, height = 1, name = "killer_plot"))
+  
+  for (i in seq_len(nrow(data))) {
+    row <- (i - 1) %/% num_cols
+    col <- (i - 1) %% num_cols
+    
+    x <- (col + 1) / (num_cols + 1)
+    y <- 1 - (row + 1) / (num_rows + 1)
+    size <- data$size[i]
+    
+    draw_county_figure(x, y, size, data$dominant_factor[i])
+    grid.text(label = data$County[i], x = x, y = y - size * 0.05, 
+              gp = gpar(fontsize = 10, col = "black"))
+  }
+}
+
+```
+
+```{r, echo = FALSE, fig.cap = "Killer Plot (State: Alabama, Mortality Rate Range: 300-800, Health Factor: All) "}
+# print chosen input valuesfor killer plot (slider in interactive version)
+#cat("State: Alabama","\n")
+#cat("Mortality Rate Range: 300-800", "\n")
+#cat("Health Factor: All", "\n")
+
+# filtering
+raw_data <- read.csv("C:/Users/shakt/Downloads/Behavioral_and_Mortality_Statistics_By_County_2019.csv")
+filtered_data <- raw_data %>%
+  filter(State == "Alabama") %>%  
+  filter(avg_mortality_rate >= 300 & avg_mortality_rate <= 800) %>% # Replace range as neede in interactive version
+  mutate(
+    dominant_factor = case_when(
+      percent_excessive_drinking >= percent_smokers &
+      percent_excessive_drinking >= percent_obese &
+      percent_excessive_drinking >= percent_physically_inactive ~ "Alcoholic",
+      
+      percent_smokers >= percent_obese &
+      percent_smokers >= percent_physically_inactive ~ "Smoking",
+      
+      percent_obese >= percent_smokers &
+      percent_obese >= percent_physically_inactive ~ "Obesity",
+      
+      TRUE ~ "Inactivity"
+    )
+  ) %>%
+  mutate(size = avg_mortality_rate / max(avg_mortality_rate, na.rm = TRUE) * 0.1)
+
+# Generate and display the static plot
+create_killer_plot(filtered_data)
+
+```
+
+Our **Killer Plot** is an interactive visualization of our county-level CVD mortality data, designed to highlight regional health disparities and key behavioral and socioeconomic health factors. Users can explore state and county trends, filter by mortality rates, and focus on predominant health factors such as smoking, obesity, inactivity, or alcohol use. Each county is represented by one of four distinct symbols, —a cigarette, couch, beer bottle, or hamburger—corresponding to the leading health factor, with icon size reflecting the mortality rate. Larger icons signify higher mortality, offering an intuitive way to assess health risks and patterns.
+
+## Regional Highlights:
+
+-   **Southern States** (e.g., Alabama, Mississippi): These states consistently show elevated mortality rates. Counties like DeKalb and Lamar in Alabama or Panola and Lawrence in Mississippi feature large icons, signaling severe health challenges. Key contributing factors include high rates of obesity and inactivity, and in some areas, elevated smoking rates. Cultural and dietary habits, coupled with insufficient preventive care, can exacerbate these issues.
+
+-   **California**: Throughout our analysis, California has consistently stood out for its low CVD-related mortality rates, likely due to robust healthcare access, public health initiatives, and healthier lifestyle habits. Decades of aggressive anti-smoking campaigns have significantly reduced smoking prevalence, contributing to lower mortality rates associated with CVD.
+
+-   **Alaska**: While Alaska has fewer counties, distinct patterns emerge.  Smoking prevalence remains a key health concern in many parts of Alaska, particularly in rural regions where healthcare access is limited. Despite this, the overall mortality rates in some areas remain relatively low due to lower population density and, in some cases, traditional diets that may mitigate some CVD risks. However, geographic and socioeconomic isolation in regions like Nome and Bethel can exacerbate smoking-related health outcomes.
+
+## Impact:
+
+The Killer Plot helps identify unexpected trends, such as regions with lower-than-expected mortality despite challenges or areas with disproportionately high rates. By visualizing these disparities, our interactive plot can support data-driven decisions, directing resources to regions in need and emphasizing the importance of tailoring public health strategies to address specific regional challenges. It bridges the gap between raw data and actionable solutions, contributing to the fight against cardiovascular disease across diverse communities.
+
+# Conclusion
+
+This analysis confirms that while there has been significant progress in reducing hypertension-related CVD mortality over the past two decades, racial and geographic disparities persist. **Black Americans** and residents of **southern states** continue to experience disproportionately higher mortality rates, suggesting that targeted public health interventions are needed.
+
+The integration of health insurance data provided valuable insights into its relationship with mortality rates. However, as shown by our analysis of the top correlated variables—such as **physical inactivity**, **obesity**, and **smoking** —insurance coverage alone cannot address the multifaceted drivers of CVD mortality. For instance, **Black Americans**, despite having relatively high insurance coverage, still face elevated mortality rates. This highlights the critical influence of **socioeconomic conditions, access to education on healthy lifestyles, healthcare quality,** and **systemic inequities**. Similarly, groups with lower insurance coverage, such as **American Indian/Alaska Native** populations, also experience significant risks, reinforcing the need for policy solutions that address both coverage and equitable access to care.
+
+Future research should incorporate a more comprehensive analysis of **socioeconomic factors, regional health behaviors**, and **education levels** to better understand the root causes of these disparities. Evaluating the effectiveness of interventions targeting behaviors like smoking and obesity and improving access to high-quality care in regions with high mortality rates will be essential. Ultimately, healthcare policies must focus not only on expanding coverage but also on improving the equity and quality of care to reduce hypertension-related CVD mortality and address the persistent racial and geographic disparities in health outcomes.
+
+## References
+
+Centers for Disease Control and Prevention, <https://catalog.data.gov/dataset/rates-and-trends-in-heart-disease-and-stroke-mortality-among-us-adults-35-by-county-a-2000-45659>
+
+County Health Rankings & Roadmaps, <https://www.countyhealthrankings.org/health-data/methodology-and-sources/data-documentation/national-data-documentation-2010-2022>
+
+United States Census Bureau, <https://data.census.gov/table/ACSST1Y2019.S2701?q=health%20insurance%202019>
