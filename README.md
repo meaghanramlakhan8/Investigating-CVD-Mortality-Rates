@@ -55,10 +55,10 @@ quarto render Final_Report.qmd
 
 ## Contributors' names and contact info:
 
-Min Choi 
-Shakty Juarez
-Meaghan Ramlakhan
-Pinar Targil
+- Min Choi 
+- Shakty Juarez
+- Meaghan Ramlakhan
+- Pinar Targil
 
 ## License
 This project is licensed under the MIT License. See the `LICENSE` file for more details.
